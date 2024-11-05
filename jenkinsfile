@@ -1,0 +1,83 @@
+pipeline {
+    agent any
+
+    environment {
+        // Define environment variables here, such as sensitive data
+        DB_NAME = credentials('db_name')
+        DB_USER = credentials('db_user')
+        DB_PASSWORD = credentials('db_password')
+        DB_ROOT_PASSWORD = credentials('db_root_password')
+        AWS_REGION = 'us-east-1'  // Adjust as needed
+        IMAGE_TAG = "latest"  // Define the Docker image tag
+    }
+
+    stages {
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    // Build Docker images for WordPress and MySQL
+                    sh 'docker build -t my_wordpress_app:${IMAGE_TAG} -f Dockerfile-wordpress .'
+                    sh 'docker build -t my_mysql_db:${IMAGE_TAG} -f Dockerfile-mysql .'
+                }
+            }
+        }
+
+        stage('Run Basic Tests') {
+            steps {
+                script {
+                    // Run a container to test if WordPress page loads
+                    sh '''
+                    docker run -d --name wordpress_test -p 8080:80 \
+                        -e WORDPRESS_DB_HOST="localhost" \
+                        -e WORDPRESS_DB_USER=$DB_USER \
+                        -e WORDPRESS_DB_PASSWORD=$DB_PASSWORD \
+                        -e WORDPRESS_DB_NAME=$DB_NAME \
+                        my_wordpress_app:${IMAGE_TAG}
+                    sleep 10
+                    curl -f http://localhost:8080 || exit 1
+                    docker rm -f wordpress_test
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Images to AWS ECR') {
+            steps {
+                script {
+                    // Log in to AWS ECR and push images
+                    sh '''
+                    $(aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com)
+                    docker tag my_wordpress_app:${IMAGE_TAG} <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/my_wordpress_app:${IMAGE_TAG}
+                    docker tag my_mysql_db:${IMAGE_TAG} <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/my_mysql_db:${IMAGE_TAG}
+                    docker push <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/my_wordpress_app:${IMAGE_TAG}
+                    docker push <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/my_mysql_db:${IMAGE_TAG}
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to AWS') {
+            steps {
+                script {
+                    // Deploy the application stack using Docker Compose or ECS
+                    sh '''
+                    aws ecs update-service --cluster my-cluster --service wordpress-service --force-new-deployment --region $AWS_REGION
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up Docker images and containers after the build
+            sh 'docker system prune -af'
+        }
+        success {
+            echo 'Deployment completed successfully!'
+        }
+        failure {
+            echo 'Deployment failed.'
+        }
+    }
+}
