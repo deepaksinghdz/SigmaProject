@@ -11,7 +11,7 @@ Defines a volume (wordpress_data) to persist the /wp-content directory, which co
 
 {db service}
 
-Uses the MySQL 5.7 image.
+Uses the MySQL 5.7 image
 Configures MySQL environment variables to set up the database, user, and passwords.
 Defines a volume (db_data) for persistent storage of the MySQL database files.
 
